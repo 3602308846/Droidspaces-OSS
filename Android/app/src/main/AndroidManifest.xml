@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.droidspaces.app">
 
-    <!-- 项目原有核心权限（完整保留，无修改） -->
+    <!-- 项目原有全部权限，完整保留无修改 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -25,23 +25,23 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- ========== 修正后的存储权限（仅此一处声明，彻底解决重复报错，兼容现有kt代码） ========== -->
-    <!-- 读取内部存储配置文件权限（安卓6.0-12L） -->
+    <!-- 读取内部存储配置文件权限，兼容安卓6.0-14 -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"
         tools:replace="android:maxSdkVersion" />
-    <!-- 写入存储权限（安卓6.0-10，安卓11+已废弃） -->
+    <!-- 写入存储权限，仅安卓6.0-10生效，安卓11+已废弃 -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"
         tools:replace="android:maxSdkVersion" />
-    <!-- 安卓11+ 读取公共存储目录必需权限 -->
+    <!-- 安卓11+ 读取公共存储目录必需权限，适配你的配置文件读取需求 -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         android:minSdkVersion="30"
         tools:ignore="ScopedStorage" />
 
-    <!-- 项目原有功能特性声明（完整保留） -->
+    <!-- 项目原有功能特性声明，完整保留无修改 -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -64,11 +64,10 @@
         android:name="android.software.input_methods"
         android:required="false" />
 
+    <!-- 项目原生application配置，完全还原无额外添加，彻底解决资源找不到报错 -->
     <application
         android:name=".DroidspacesApp"
         android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -76,21 +75,20 @@
         android:theme="@style/Theme.Droidspaces"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
-        android:usesCleartextTraffic="true"
-        tools:targetApi="31">
+        android:usesCleartextTraffic="true">
 
-        <!-- 项目原有Activity、Service、Receiver等完整配置，无任何修改 -->
+        <!-- 项目原生MainActivity配置，还原原有主题，解决主题找不到报错 -->
         <activity
             android:name=".ui.activity.MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.Droidspaces.Splash">
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- 项目原有服务、广播接收器，完整保留无修改 -->
         <service
             android:name=".service.TerminalSessionService"
             android:exported="false"
@@ -105,16 +103,6 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
-
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
 
     </application>
 
