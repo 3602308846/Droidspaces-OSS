@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,19 +22,31 @@ import androidx.core.view.WindowCompat
 import com.droidspaces.app.ui.navigation.DroidspacesNavigation
 import com.droidspaces.app.ui.theme.DroidspacesTheme
 import com.droidspaces.app.ui.theme.rememberThemeState
+import com.droidspaces.app.util.ContainerManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
     private var isLoading by mutableStateOf(false)
 
-    // ── POST_NOTIFICATIONS permission (Android 13+ / API 33+) ─────────────────
-    // Samsung's SecFgsManagerController suppresses any FGS notification from apps
-    // that don't hold this permission, which immediately strips the ONGOING flag
-    // and causes TerminalSessionService to be treated as non-foreground.
-    // The service then gets killed and the binder cycles null → non-null, causing
-    // the crash loop.  Requesting this up-front breaks that cycle.
-    // Approach ported from ReTerminal's MainActivity (retries up to 3 times).
+    // =============== 自动启动容器核心配置 ===============
+    // 你指定的配置文件完整路径
+    private val CONFIG_FILE_PATH = "/storage/emulated/0/qy/peizhi.txt"
+    // 读不到配置/文件不存在时的兜底默认容器名
+    private val DEFAULT_CONTAINER_NAME = "arch"
+    // 存储权限请求码
+    private val STORAGE_PERMISSION_CODE = 1002
+    // 防止APP切后台再切回重复执行启动逻辑
+    private var isAutoStartExecuted = false
+    // 存储权限申请弹窗控制
+    private var showStorageRationale by mutableStateOf(false)
+    // ===================================================
 
+    // ── POST_NOTIFICATIONS 权限原有逻辑完全保留 ─────────────────
     private var showNotificationRationale by mutableStateOf(false)
 
     private val requestNotificationPermission =
@@ -42,6 +55,19 @@ class MainActivity : AppCompatActivity() {
                 showNotificationRationale = true
             }
         }
+
+    // =============== 新增：存储权限申请注册 ===============
+    private val requestStoragePermission =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            val allGranted = permissions.entries.all { it.value }
+            if (!allGranted) {
+                showStorageRationale = true
+            } else {
+                // 权限申请成功，执行自动启动
+                autoStartContainerFromConfig()
+            }
+        }
+    // ===================================================
 
     fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -61,6 +87,56 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    // =============== 新增：存储权限检查&申请方法 ===============
+    private fun checkStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // 安卓11+ 需要申请管理所有文件权限
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = android.net.Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                startActivity(intent)
+            }
+        } else {
+            // 安卓10及以下申请普通存储权限
+            when {
+                checkStoragePermission() -> {
+                    // 已经有权限
+                }
+                shouldShowRequestPermissionRationale(android.Manifest.permission.READ_EXTERNAL_STORAGE) -> {
+                    showStorageRationale = true
+                }
+                else -> {
+                    requestStoragePermission.launch(
+                        arrayOf(
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        )
+                    )
+                }
+            }
+        }
+    }
+    // ===================================================
 
     @Composable
     private fun NotificationRationaleDialog() {
@@ -93,6 +169,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // =============== 新增：存储权限申请弹窗 ===============
+    @Composable
+    private fun StorageRationaleDialog() {
+        if (showStorageRationale) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showStorageRationale = false },
+                title = { Text("存储权限申请") },
+                text = { Text("需要读取内部存储的配置文件，才能自动启动指定容器，请授予存储权限") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showStorageRationale = false
+                        requestStoragePermission()
+                    }) {
+                        Text("授予权限")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showStorageRationale = false }) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+    }
+    // ===================================================
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen before super.onCreate for faster display
         val splashScreen = installSplashScreen()
@@ -111,17 +213,71 @@ class MainActivity : AppCompatActivity() {
         setContent {
             ThemeWrapper {
                 NotificationRationaleDialog()
+                StorageRationaleDialog() // 存储权限弹窗
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     DroidspacesNavigation(
-                        onContentReady = { isLoading = false }
+                        onContentReady = { 
+                            isLoading = false
+                            // =============== 核心：APP就绪后执行自动启动 ===============
+                            if (!isAutoStartExecuted) {
+                                isAutoStartExecuted = true
+                                if (checkStoragePermission()) {
+                                    autoStartContainerFromConfig()
+                                } else {
+                                    requestStoragePermission()
+                                }
+                            }
+                            // ===================================================
+                        }
                     )
                 }
             }
         }
     }
+
+    // =============== 核心：自动启动容器逻辑（100%复用APP原生方法） ===============
+    private fun autoStartContainerFromConfig() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val configFile = File(CONFIG_FILE_PATH)
+                // 读取容器名：文件存在就读第一行，不存在/空就用默认值
+                val containerName = if (configFile.exists() && configFile.canRead()) {
+                    configFile.readLines().firstOrNull { it.isNotBlank() }?.trim() ?: DEFAULT_CONTAINER_NAME
+                } else {
+                    DEFAULT_CONTAINER_NAME
+                }
+
+                // 切回主线程，调用APP原生启动方法
+                withContext(Dispatchers.Main) {
+                    // 精准匹配你项目的ContainerManager单例
+                    val containerManager = ContainerManager.getInstance(this@MainActivity)
+                    
+                    // 先判断容器是否已经运行，避免重复启动
+                    if (!containerManager.isContainerRunning(containerName)) {
+                        // 调用APP原生启动方法，和手动点APP启动按钮完全一致
+                        // 绝对不会触发Termux桥接、不会执行CLI二进制
+                        containerManager.startContainer(containerName)
+                    }
+                }
+            } catch (e: Exception) {
+                // 异常兜底：启动默认容器，不影响APP正常使用
+                withContext(Dispatchers.Main) {
+                    try {
+                        val containerManager = ContainerManager.getInstance(this@MainActivity)
+                        if (!containerManager.isContainerRunning(DEFAULT_CONTAINER_NAME)) {
+                            containerManager.startContainer(DEFAULT_CONTAINER_NAME)
+                        }
+                    } catch (e: Exception) {
+                        // 静默处理异常，不崩溃APP
+                    }
+                }
+            }
+        }
+    }
+    // ===================================================
 }
 
 @Composable
